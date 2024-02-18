@@ -1,0 +1,171 @@
+---
+title: "Exploratory Data Analysis GDP"
+author: "Jakub Pączek"
+date: "2024-02-17"
+output: 
+  html_document:
+    theme: spacelab
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+# Introduction
+
+<span style = " color:teal"><b>Gross Domestic Product</b></span> is one of the most important economical measures which stands for the sum of the values of all the products and services delivered by companies, not necessarily originating from a country, but running their business in that country. 
+
+Therefore it is crucial and at the same time the most basic tool when comparing economies of various countries.
+
+In this analysis I will take a look at the nominal GDP. It is probably the most common of GDP. It, as I've mentioned, does include only companies operating in a specific country and it summarizes the wealth of a nation as a whole, instead of showing how rich are its citizens, for which GDP per capita is used.
+The most important point is that it expresses the value of goods in nominal prices, in this case in millions of US dollars. In contrast, there is a version of GDP based of PPP (Purchasing Power Parity), which also takes into account prices and costs of living in a country.
+
+## Data source
+
+In my analysis I will rely on data available on Wikipedia on that URL:
+
+- https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)
+
+I am going to focus only on the data gathered by United Nations, as it is the most complete and, I believe, more common than the other sources.
+
+The measurement of GDP is from the year <span style = " color:teal"><b>2021</b></span>.
+
+```{r}
+library(rvest)
+page <- read_html("https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)")
+data <- html_node(page, ".wikitable")
+data <- html_table(data, fill = TRUE, dec = ".")
+WorldGDP <- data[2, 7]
+data <- data[3:215,c(1,2,7)]
+```
+
+## Preparing data
+
+There is an issue that the comma signs are used to separate each 3 decimal places. I will also change the name of columns so it will be easier to refer to them.
+
+```{r, warning = FALSE}
+deleteCommas <- function(x){as.numeric(gsub(",", "", x))}
+data[,3] <- lapply(data[,3], deleteCommas)
+WorldGDP <- deleteCommas(WorldGDP)
+colnames(data)[2] <- "Region"
+colnames(data)[3] <- "GDP"
+```
+
+Unfortunately data for Taiwan is NA, so I will drop this record.
+
+```{r}
+data <- data[!is.na(data$GDP),]
+```
+
+# Distribution of the GDP
+
+## Descriptive statistics
+
+```{r, warning = F, message = F}
+library(dplyr)
+library(knitr)
+library(moments)
+data %>%
+  group_by(Region) %>%
+  summarize(Mean = mean(GDP), Median = median(GDP), "Standard Derivation" = sd(GDP), IQR = IQR(GDP), Skewness = skewness(GDP), Kurtosis = kurtosis(GDP)) %>%
+  kable()
+```
+What can be seen is that Africa is the region with the lowest average GDP. However, if we take a look at the median it clearly suggest, which if fact seems logical, that Oceania has countries with smallest economies. This difference is, I think, mostly due to Australia, having one of the biggest economies in the world, being included there.
+Both the fact that in each case the mean is much higher than median and the skewness coefficient gives us the information that the distribution is strongly right-skewed.
+```{r, warning = F, message = F}
+library(ggplot2)
+data %>%
+  ggplot(aes(x = GDP)) +
+  geom_histogram(bins = 50) +
+  theme_light() +
+  labs(title = "Distribution of GDP in the whole world", x = "GDP (mln USD)")
+ 
+```
+The histogram confirms that without any doubt. The vast majority of countries has the GDP much lower than the most rich ones.
+
+Now let's have a look at the same plot with removed outliers. In this case let it be GDP lower than 1 billion USD.
+
+```{r, warning = F, message = F}
+library(ggplot2)
+data %>%
+  filter(GDP < 1000000) %>%
+  ggplot(aes(x = GDP)) +
+  geom_histogram(bins = 20) +
+  theme_light() +
+  labs(title = "Distribution of GDP in the whole world (no outliers)", x = "GDP (mln USD)")
+ 
+```
+
+Skewness here is still visible. Let's also look at it by regions.
+
+```{r, warning = F, message = F}
+data %>%
+  filter(GDP < 1000000) %>%
+  ggplot(aes(x = GDP)) +
+  geom_histogram(bins = 20) +
+  theme_light() +
+  facet_wrap(~ Region) +
+  labs(title = "Distribution of GDP in individual regions", x = "GDP (mln USD)")
+ 
+```
+
+The plots seem similar to one another and to the main plot, so there can be assumed that distribution does not diverge by a lot throughout the regions.
+
+Next statistic to look at is the standard derivation. The biggest value is observable for the Americas. It is not unexpected as it is the region with either big economies such as the United States and really small ones, like various Caribbean nations. 
+Nevertheless, it will give us more information if divided by the mean, making it a coefficient of variation.
+
+```{r}
+data %>%
+  group_by(Region) %>%
+  summarize("Coefficient of variation" = sd(GDP)/mean(GDP)) %>%
+  kable()
+```
+
+It makes the matter even more transparent. The variation in the region of the Americas is almost three times as big as in Europe or Africa. The region of Asia and Oceania are also more divergent, the second being presumably thanks to the huge difference between Australia and islander nations. 
+
+The IQR highligths mostly two things already mentioned. Oceania has a lot of countries running tiny economies, whereas countries of Europe on average stay wealthy.
+
+Because of the high skewness, the kurtosis does not bring in any valid information. By what was already discussed, we can already almost with certainty reject the assumption of normality of the distribution. Regardless of that let's perform some test to make sure.
+
+```{r, warning = FALSE, message=FALSE}
+library(nortest)
+data %>%
+  summarize("Shapio-Wilk Test" = shapiro.test(GDP)$p, "Kolmogorov Test" = ks.test(GDP, "pnorm", mean = mean(GDP), sd = sd(GDP))$p, "Pearson Test" = pearson.test(GDP)$p) %>% kable()
+```
+
+Definitely, the normality of the distribution is out of question.
+
+## More plots
+
+```{r}
+data %>%
+  ggplot(aes(y = GDP, x = reorder(`Country/Territory`, GDP), group = 1)) +
+  geom_line(color = "turquoise", linewidth = 1.2) +
+  theme(axis.text.x = element_blank()) +
+  labs(x = "", title = "Proportion of the distribution of GDP")
+```
+
+```{r}
+data %>%
+  filter(GDP < 5000000) %>%
+  ggplot(aes(y = GDP, x = reorder(`Country/Territory`, GDP), group = 1, color = Region)) +
+  geom_line() +
+  theme(axis.text.x = element_blank(), legend.position = "none") +
+  labs(x = "", title = "Proportions of GDP distribution in regions") +
+  facet_wrap(~ Region)
+```
+
+Lorenz curve
+
+```{r}
+library(ineq)
+lc <- Lc(data$GDP)
+lc_dat <- data.frame(cbind(lc$p, lc$L))
+ggplot(lc_dat, aes(x = X1, y = X2)) +
+  geom_line(color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "navy") +
+  labs(title = "GDP Distribution", subtitle = "Lorenz Curve",
+       x = "Cumulative Proportion of Population",
+       y = "Cumulative Proportion of Income") +
+  theme_light()
+```
+
